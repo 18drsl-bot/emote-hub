@@ -2678,7 +2678,7 @@ function UIX.readSpeedBox(box, current)
         box.Text = tostring(current)
         return current
     end
-    n = math.max(0, math.floor(n * 100 + 0.5) / 100)
+    n = math.max(0, n)
     box.Text = tostring(n)
     return n
 end

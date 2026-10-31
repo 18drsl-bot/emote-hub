@@ -2516,15 +2516,16 @@ do
 
     -- Highlight whichever preset matches the current value on open
     local function syncPresetColors()
+        local text = UIX.cfBox.Text:match("^%s*(.-)%s*$")
+        if text:sub(1, 1) == "." then text = "0" .. text end
+        local current = tonumber(text)
         for i, b in ipairs(UIX.cfPresetBtns) do
-            local active = presets[i] == state.cfValue
+            local active = current ~= nil and presets[i] == current
             b.BackgroundColor3 = active and C.accent or C.panelHi
             b.TextColor3       = active and C.dark   or C.text
         end
     end
 
-    -- Re-sync when the box loses focus or reset is pressed
-    local _origCfFocus = UIX.cfBox.FocusLost
     UIX.cfBox:GetPropertyChangedSignal("Text"):Connect(syncPresetColors)
     syncPresetColors()
 end

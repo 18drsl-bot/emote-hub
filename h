@@ -2673,12 +2673,14 @@ UIX.cfToggle.MouseButton1Click:Connect(function()
 end)
 
 function UIX.readSpeedBox(box, current)
-    local n = tonumber((box.Text:gsub("[^%d%.]", "")))
-    if not n then
+    local text = box.Text:match("^%s*(.-)%s*$") -- trim whitespace
+    -- ".034" -> "0.034" so tonumber parses it correctly
+    if text:sub(1, 1) == "." then text = "0" .. text end
+    local n = tonumber(text)
+    if not n or n < 0 then
         box.Text = tostring(current)
         return current
     end
-    n = math.max(0, n)
     box.Text = tostring(n)
     return n
 end

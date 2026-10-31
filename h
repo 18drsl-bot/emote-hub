@@ -183,7 +183,7 @@ local state = {
     noclipKey = (type(saved.noclipKey) == "string" and saved.noclipKey ~= "") and saved.noclipKey or nil,
     antifling = false,
     noHead = false,
-    cfValue = math.clamp(tonumber(saved.cfValue) or 50, 0, 500),
+    cfValue = math.max(0, tonumber(saved.cfValue) or 0.34),
     cframeSpeedOn = saved.cframeSpeedOn == true,
     posX = tonumber(saved.posX),
     posY = tonumber(saved.posY),
@@ -2459,7 +2459,7 @@ function UIX.makeSpeedRow(y, label, startValue)
     return box, toggle, reset
 end
 
-UIX.cfBox, UIX.cfToggle, UIX.cfReset = UIX.makeSpeedRow(42, "CFrame speed", state.cfValue)
+UIX.cfBox, UIX.cfToggle, UIX.cfReset = UIX.makeSpeedRow(42, "CFrame speed", 0.34)
 
 new("TextLabel", {
     Parent = UIX.speedWin,
@@ -2678,19 +2678,19 @@ function UIX.readSpeedBox(box, current)
         box.Text = tostring(current)
         return current
     end
-    n = math.clamp(math.floor(n * 100 + 0.5) / 100, 0, 500)
+    n = math.max(0, math.floor(n * 100 + 0.5) / 100)
     box.Text = tostring(n)
     return n
 end
 
 -- Reset: back to the default number and switched off
 UIX.cfReset.MouseButton1Click:Connect(function()
-    state.cfValue = 50
-    UIX.cfBox.Text = "50"
+    state.cfValue = 0.34
+    UIX.cfBox.Text = "0.34"
     state.cframeSpeedOn = false
     saveSettings()
     updateWalkStopBtn()
-    setStatus("CFrame speed reset to 50 and turned off")
+    setStatus("CFrame speed reset to 0.34 and turned off")
 end)
 
 UIX.cfBox.FocusLost:Connect(function()

@@ -2581,7 +2581,7 @@ table.insert(conns, RunService.Heartbeat:Connect(function(dt)
             hrp.AssemblyLinearVelocity.Y,
             move.Unit.Z * animSpeed
         )
-        hrp.CFrame = hrp.CFrame + move.Unit * (state.cfValue * dt * 60)
+        hrp.CFrame = hrp.CFrame + move.Unit * (state.cfValue * dt * 10)
     else
         -- Not pressing any key — bleed off horizontal velocity so idle anim plays
         local v = hrp.AssemblyLinearVelocity

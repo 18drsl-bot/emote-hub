@@ -183,7 +183,7 @@ local state = {
     noclipKey = (type(saved.noclipKey) == "string" and saved.noclipKey ~= "") and saved.noclipKey or nil,
     antifling = false,
     noHead = false,
-    cfValue = math.max(0, tonumber(saved.cfValue) or 0.34),
+    cfValue = math.max(0, tonumber(saved.cfValue) or 6),
     cframeSpeedOn = saved.cframeSpeedOn == true,
     posX = tonumber(saved.posX),
     posY = tonumber(saved.posY),
@@ -974,10 +974,28 @@ local function getHumanoid()
 end
 
 local function stopTrack()
+    state.emoteToken = (state.emoteToken or 0) + 1 -- cancels an emote that is still loading
     if state.track then
-        pcall(function() state.track:Stop() end)
+        pcall(function() state.track:Stop(0.1) end)
         state.track = nil
     end
+    -- also stop any leftover copy of the same animation (e.g. one the engine restarted)
+    local animId = state.activeAnimId
+    if animId then
+        local char = LocalPlayer.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if hum then
+            pcall(function()
+                for _, tr in ipairs(hum:GetPlayingAnimationTracks()) do
+                    local a = tr.Animation
+                    if a and a.AnimationId:match("%d+") == animId then
+                        tr:Stop(0.1)
+                    end
+                end
+            end)
+        end
+    end
+    state.activeAnimId = nil
     state.activeEmote = nil
     updateHighlights()
 end
@@ -1014,14 +1032,18 @@ local function playEmote(item)
         return
     end
 
-    -- clicking the emote that is already playing turns it off
-    if state.track and state.activeEmote ~= nil and tostring(state.activeEmote) == tostring(item.id) then
+    -- clicking the emote that is already playing (green) turns it off
+    if state.activeEmote ~= nil and tostring(state.activeEmote) == tostring(item.id) then
         stopTrack()
         setStatus("Stopped: " .. item.name)
         return
     end
 
     stopTrack()
+    local myToken = state.emoteToken
+    -- mark it green right away so a second click while it loads also cancels it
+    state.activeEmote = item.id
+    updateHighlights()
 
     -- Humanoid:PlayEmote tracks are cancelled by the engine as soon as you move.
     -- With Walk stop OFF we play the animation ourselves (Action priority) so it
@@ -1067,7 +1089,15 @@ local function playEmote(item)
         newTrack = viaAnimator() or viaEmote()
     end
 
+    if myToken ~= state.emoteToken then
+        -- clicked again (or another emote) while this one was loading
+        if newTrack then pcall(function() newTrack:Stop(0) end) end
+        return
+    end
+
     if not newTrack then
+        state.activeEmote = nil
+        updateHighlights()
         setStatus("Couldn't play that (R15 only)")
         return
     end
@@ -1077,6 +1107,7 @@ local function playEmote(item)
 
     state.track = newTrack
     state.activeEmote = item.id
+    pcall(function() state.activeAnimId = newTrack.Animation.AnimationId:match("%d+") end)
     updateHighlights()
     setStatus("Playing: " .. item.name)
 
@@ -1223,7 +1254,14 @@ local function applyPack(item, category)
             updateHighlights()
             setStatus("Reset " .. (category or "all animations") .. " to default")
         else
-            setStatus("Nothing to reset")
+            if category then
+                state.activeParts[category] = nil
+            else
+                state.activePack = nil
+                state.activeParts = {}
+            end
+            updateHighlights()
+            setStatus("Turned off " .. item.name)
         end
         return
     end
@@ -1479,7 +1517,7 @@ end
 
 local function runBind(bind)
     if bind.kind == "emote" then
-        if state.track and tostring(state.activeEmote) == tostring(bind.id) then
+        if state.activeEmote ~= nil and tostring(state.activeEmote) == tostring(bind.id) then
             stopTrack()
             setStatus("Stopped")
         else
@@ -2459,7 +2497,7 @@ function UIX.makeSpeedRow(y, label, startValue)
     return box, toggle, reset
 end
 
-UIX.cfBox, UIX.cfToggle, UIX.cfReset = UIX.makeSpeedRow(42, "CFrame speed", 0.34)
+UIX.cfBox, UIX.cfToggle, UIX.cfReset = UIX.makeSpeedRow(42, "CFrame speed", state.cfValue)
 
 new("TextLabel", {
     Parent = UIX.speedWin,
@@ -2467,7 +2505,7 @@ new("TextLabel", {
     Position = UDim2.fromOffset(12, 84),
     Size = UDim2.new(1, -24, 0, 80),
     Font = Enum.Font.Gotham,
-    Text = "CFrame speed adds that many studs every frame on top of your normal walk (0.002 = +0.002 studs per frame at 60 FPS). Works with any WalkSpeed.",
+    Text = "CFrame speed adds exactly this many studs per second on top of your normal walk (0.002 = +0.002 studs/s). Works with any WalkSpeed and frame rate.",
     TextColor3 = C.dim,
     TextSize = 10,
     TextWrapped = true,
@@ -2477,7 +2515,7 @@ new("TextLabel", {
 
 -- CFrame speed presets
 do
-    local presets = { 0.1, 0.25, 0.5, 1 }
+    local presets = { 5, 10, 15, 20 }
     local btnW = 63
     local gap  = 4
     local totalW = #presets * btnW + (#presets - 1) * gap
@@ -2549,22 +2587,73 @@ table.insert(conns, UserInputService.InputEnded:Connect(function(input)
     end
 end))
 
-table.insert(conns, RunService.Heartbeat:Connect(function(dt)
-    if not state.cframeSpeedOn then return end
+UIX.CF_ACCEL = 20            -- higher = snappier start/stop
+UIX.CF_USE_COLLISION = false -- set true to stop at walls
+UIX.cfVel = Vector3.zero
+UIX.cfPending = Vector3.zero -- movement too small to land on the float32 position grid yet
+
+table.insert(conns, RunService.RenderStepped:Connect(function(dt)
     local char = LocalPlayer.Character
     local hum = char and char:FindFirstChildOfClass("Humanoid")
-    if not hum or hum.Sit then return end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-
-    -- Ride on top of normal walking: the Humanoid keeps moving you and playing
-    -- walk/run anims, and every frame you get pushed an extra cfValue studs.
-    -- Scaled to 60 FPS so the boost is the same at any frame rate.
-    local dir = hum.MoveDirection
-    dir = Vector3.new(dir.X, 0, dir.Z)
-    if dir.Magnitude > 0.01 then
-        hrp.CFrame = hrp.CFrame + dir.Unit * (state.cfValue * math.min(dt, 0.1) * 60)
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not state.cframeSpeedOn or not hum or not hrp or hum.Sit then
+        UIX.cfVel, UIX.cfPending = Vector3.zero, Vector3.zero
+        return
     end
+    dt = math.min(dt, 0.1)
+
+    local cam = workspace.CurrentCamera
+    local look, right = cam.CFrame.LookVector, cam.CFrame.RightVector
+    local f = Vector3.new(look.X, 0, look.Z)
+    local r = Vector3.new(right.X, 0, right.Z)
+    if f.Magnitude < 1e-4 then f = Vector3.new(0, 0, -1) else f = f.Unit end
+    if r.Magnitude < 1e-4 then r = Vector3.new(1, 0, 0) else r = r.Unit end
+
+    local dir = Vector3.zero
+    if not UserInputService:GetFocusedTextBox() then
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir += f end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then dir -= f end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then dir -= r end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir += r end
+    end
+    if dir.Magnitude < 1e-4 then
+        -- mobile / gamepad
+        local md = hum.MoveDirection
+        dir = Vector3.new(md.X, 0, md.Z)
+    end
+    if dir.Magnitude > 1e-4 then dir = dir.Unit else dir = Vector3.zero end
+
+    -- frame-rate independent smoothing toward the exact target speed
+    local target = dir * (state.cfValue or 0)
+    local alpha = 1 - math.exp(-UIX.CF_ACCEL * dt)
+    UIX.cfVel = UIX.cfVel:Lerp(target, alpha)
+    if dir == Vector3.zero and UIX.cfVel.Magnitude < 1e-6 then
+        UIX.cfVel, UIX.cfPending = Vector3.zero, Vector3.zero
+        return
+    end
+
+    -- Parts store position as float32, so tiny per-frame steps (e.g. 0.002
+    -- studs/s) get rounded away. Bank them until they're big enough to stick.
+    UIX.cfPending += UIX.cfVel * dt
+    local p = hrp.Position
+    local grid = math.max(math.abs(p.X), math.abs(p.Y), math.abs(p.Z), 1) * 2 ^ -22
+    if UIX.cfPending.Magnitude < grid then return end
+
+    local move = UIX.cfPending
+    if UIX.CF_USE_COLLISION then
+        local params = RaycastParams.new()
+        params.FilterDescendantsInstances = { char }
+        params.FilterType = Enum.RaycastFilterType.Exclude
+        local hit = workspace:Raycast(p, move, params)
+        if hit then
+            move = move.Unit * math.max(hit.Distance - 0.2, 0)
+            UIX.cfVel = Vector3.zero
+        end
+    end
+    local before = hrp.Position
+    hrp.CFrame += move
+    UIX.cfPending -= (hrp.Position - before)
+    if UIX.cfPending.Magnitude > move.Magnitude + 1 then UIX.cfPending = Vector3.zero end
 end))
 
 function UIX.styleToggle(btn, on)
@@ -2665,12 +2754,12 @@ end
 
 -- Reset: back to the default number and switched off
 UIX.cfReset.MouseButton1Click:Connect(function()
-    state.cfValue = 0.34
-    UIX.cfBox.Text = "0.34"
+    state.cfValue = 6
+    UIX.cfBox.Text = "6"
     state.cframeSpeedOn = false
     saveSettings()
     updateWalkStopBtn()
-    setStatus("CFrame speed reset to 0.34 and turned off")
+    setStatus("CFrame speed reset to 6 and turned off")
 end)
 
 UIX.cfBox.FocusLost:Connect(function()

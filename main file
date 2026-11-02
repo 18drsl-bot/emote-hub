@@ -2467,7 +2467,7 @@ new("TextLabel", {
     Position = UDim2.fromOffset(12, 84),
     Size = UDim2.new(1, -24, 0, 80),
     Font = Enum.Font.Gotham,
-    Text = "CFrame speed moves you forward in studs per second. It works independently of WalkSpeed, so normal movement still feels the same.",
+    Text = "CFrame speed adds that many studs every frame on top of your normal walk (0.002 = +0.002 studs per frame at 60 FPS). Works with any WalkSpeed.",
     TextColor3 = C.dim,
     TextSize = 10,
     TextWrapped = true,
@@ -2477,7 +2477,7 @@ new("TextLabel", {
 
 -- CFrame speed presets
 do
-    local presets = { 5, 10, 15, 20 }
+    local presets = { 0.1, 0.25, 0.5, 1 }
     local btnW = 63
     local gap  = 4
     local totalW = #presets * btnW + (#presets - 1) * gap
@@ -2557,36 +2557,13 @@ table.insert(conns, RunService.Heartbeat:Connect(function(dt)
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
 
-    -- Flatten camera vectors onto the horizontal plane so vertical camera tilt
-    -- doesn't push the character up or down
-    local cam = workspace.CurrentCamera
-    local forward = Vector3.new(cam.CFrame.LookVector.X,  0, cam.CFrame.LookVector.Z)
-    local right   = Vector3.new(cam.CFrame.RightVector.X, 0, cam.CFrame.RightVector.Z)
-    if forward.Magnitude > 0 then forward = forward.Unit end
-    if right.Magnitude   > 0 then right   = right.Unit   end
-
-    local move = Vector3.zero
-    if UserInputService:IsKeyDown(Enum.KeyCode.W) then move = move + forward end
-    if UserInputService:IsKeyDown(Enum.KeyCode.S) then move = move - forward end
-    if UserInputService:IsKeyDown(Enum.KeyCode.A) then move = move - right   end
-    if UserInputService:IsKeyDown(Enum.KeyCode.D) then move = move + right   end
-
-    if move.Magnitude > 0 then
-        -- Set horizontal velocity to a run-speed value so the Animate script
-        -- sees movement and plays walk/run anims. The CFrame assignment each
-        -- heartbeat overrides where physics actually puts the character, so this
-        -- velocity only drives the animation system, not actual position.
-        local animSpeed = math.max(hum.WalkSpeed * 2, 24)
-        hrp.AssemblyLinearVelocity = Vector3.new(
-            move.Unit.X * animSpeed,
-            hrp.AssemblyLinearVelocity.Y,
-            move.Unit.Z * animSpeed
-        )
-        hrp.CFrame = hrp.CFrame + move.Unit * (state.cfValue * dt * 10)
-    else
-        -- Not pressing any key — bleed off horizontal velocity so idle anim plays
-        local v = hrp.AssemblyLinearVelocity
-        hrp.AssemblyLinearVelocity = Vector3.new(v.X * 0.1, v.Y, v.Z * 0.1)
+    -- Ride on top of normal walking: the Humanoid keeps moving you and playing
+    -- walk/run anims, and every frame you get pushed an extra cfValue studs.
+    -- Scaled to 60 FPS so the boost is the same at any frame rate.
+    local dir = hum.MoveDirection
+    dir = Vector3.new(dir.X, 0, dir.Z)
+    if dir.Magnitude > 0.01 then
+        hrp.CFrame = hrp.CFrame + dir.Unit * (state.cfValue * math.min(dt, 0.1) * 60)
     end
 end))
 

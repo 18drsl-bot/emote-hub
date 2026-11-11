@@ -2593,12 +2593,43 @@ table.insert(conns, UserInputService.InputEnded:Connect(function(input)
         speedSliding, speedTouch = false, nil
     end
 end))
-speedMinus.MouseButton1Click:Connect(function()
-    UIX.setCFrameSpeed(state.cfValue - 1)
-end)
-speedPlus.MouseButton1Click:Connect(function()
-    UIX.setCFrameSpeed(state.cfValue + 1)
-end)
+-- Tap once for one step; hold for 0.4 seconds to repeat slowly.
+local function holdSpeedButton(btn, step)
+    local heldInput = nil
+    local holding = false
+    local sequence = 0
+
+    table.insert(conns, btn.InputBegan:Connect(function(input)
+        local kind = input.UserInputType
+        if holding or (kind ~= Enum.UserInputType.MouseButton1
+            and kind ~= Enum.UserInputType.Touch) then return end
+
+        holding = true
+        heldInput = input
+        sequence = sequence + 1
+        local mySequence = sequence
+        UIX.setCFrameSpeed(state.cfValue + step)
+
+        task.spawn(function()
+            task.wait(0.4)
+            while holding and sequence == mySequence and btn.Parent and gui.Parent do
+                UIX.setCFrameSpeed(state.cfValue + step)
+                task.wait(0.13)
+            end
+        end)
+    end))
+
+    table.insert(conns, UserInputService.InputEnded:Connect(function(input)
+        if holding and input == heldInput then
+            holding = false
+            heldInput = nil
+            sequence = sequence + 1
+        end
+    end))
+end
+
+holdSpeedButton(speedMinus, -1)
+holdSpeedButton(speedPlus, 1)
 
 local speedMinimized = false
 UIX.speedMinimize.MouseButton1Click:Connect(function()

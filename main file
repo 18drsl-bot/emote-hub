@@ -851,12 +851,6 @@ UIX.characterResetOpen = UIX.makeToggleRow(
 )
 UIX.characterResetOpen.Text = "OPEN"
 
-UIX.mouseGuiOpen = UIX.makeToggleRow(
-    7, "Custom Mouse", "Opens a separate window to customize your cursor."
-)
-UIX.mouseGuiOpen.Text = "OPEN"
-
-
 -- Bottom bar: Stop + count + mode button
 local bottom = new("Frame", {
     Parent = body,
@@ -2669,145 +2663,6 @@ table.insert(conns, UserInputService.InputEnded:Connect(function(input)
     end
 end))
 
--- Custom mouse: CoreGui-hosted cursor and a draggable control window.
--- The cursor is visual only; normal mouse clicks still work.
-local mouseEnabled = true -- custom cursor starts enabled
-local mouseSize = 20
-local mouseColorIndex = 1
-local mouseColors = { C.accent, Color3.fromRGB(255,255,255), C.red, C.gold, Color3.fromRGB(90,170,255) }
-local mouseNames = { "GREEN", "WHITE", "RED", "GOLD", "BLUE" }
-local oldMouseIconEnabled = UserInputService.MouseIconEnabled
-
-UIX.mouseCursor = new("Frame", {
-    Name = "CustomMouseCursor", Parent = gui, BackgroundTransparency = 1,
-    Size = UDim2.fromOffset(50,50), AnchorPoint = Vector2.new(0.5,0.5),
-    ZIndex = 100, Visible = false, Active = false,
-})
-local cursorParts = {}
-for _, spec in ipairs({
-    {0.5,0,0,0, 2,7}, {0.5,0,1,0, 2,7},
-    {0,0,0.5,0, 7,2}, {1,0,0.5,0, 7,2},
-}) do
-    local part = new("Frame", { Parent = UIX.mouseCursor, BackgroundColor3 = C.accent,
-        BorderSizePixel = 0, AnchorPoint = Vector2.new(0.5,0.5),
-        Position = UDim2.new(spec[1],spec[2],spec[3],spec[4]),
-        Size = UDim2.fromOffset(spec[5],spec[6]), ZIndex = 101, Active = false,
-    }, { corner(2) })
-    table.insert(cursorParts, part)
-end
-local mouseDot = new("Frame", { Parent = UIX.mouseCursor, BackgroundColor3 = C.accent,
-    BorderSizePixel = 0, AnchorPoint = Vector2.new(0.5,0.5),
-    Position = UDim2.fromScale(0.5,0.5), Size = UDim2.fromOffset(4,4),
-    ZIndex = 101, Active = false,
-}, { corner(4) })
-
-UIX.mouseWin = new("Frame", {
-    Name = "CustomMouseWindow", Parent = gui, BackgroundColor3 = C.bg,
-    BorderSizePixel = 0, Position = UDim2.fromOffset(25, math.max(10, viewport.Y/2-140)),
-    Size = UDim2.fromOffset(300,185), Visible = false,
-}, { corner(10), new("UIStroke", {Color=C.accent,Transparency=0.55,Thickness=1.5}) })
-UIX.mouseTitle = new("Frame", {Parent=UIX.mouseWin, BackgroundColor3=C.panel,
-    BorderSizePixel=0, Size=UDim2.new(1,0,0,30)}, {corner(10)})
-new("Frame", {Parent=UIX.mouseTitle, BackgroundColor3=C.panel, BorderSizePixel=0,
-    Position=UDim2.new(0,0,1,-12), Size=UDim2.new(1,0,0,12)})
-new("TextLabel", {Parent=UIX.mouseTitle, BackgroundTransparency=1,
-    Position=UDim2.fromOffset(12,0), Size=UDim2.new(1,-50,1,0),
-    Font=Enum.Font.GothamBold, Text="Custom Mouse", TextColor3=C.accent,
-    TextSize=14, TextXAlignment=Enum.TextXAlignment.Left})
-UIX.mouseHide = new("TextButton", {Parent=UIX.mouseTitle, BackgroundColor3=C.panelHi,
-    Position=UDim2.new(1,-30,0,3), Size=UDim2.fromOffset(24,24),
-    Font=Enum.Font.GothamBold, Text="-", TextColor3=C.text, TextSize=16}, {corner(6)})
-new("TextLabel", {Parent=UIX.mouseWin, BackgroundTransparency=1,
-    Position=UDim2.fromOffset(12,39), Size=UDim2.fromOffset(75,24),
-    Font=Enum.Font.GothamBold, Text="Cursor", TextColor3=C.text, TextSize=12,
-    TextXAlignment=Enum.TextXAlignment.Left})
-UIX.mouseToggle = new("TextButton", {Parent=UIX.mouseWin, BackgroundColor3=C.panelHi,
-    Position=UDim2.fromOffset(202,39), Size=UDim2.fromOffset(86,27),
-    Font=Enum.Font.GothamBold, Text="OFF", TextColor3=C.dim, TextSize=12}, {corner(7)})
-new("TextLabel", {Parent=UIX.mouseWin, BackgroundTransparency=1,
-    Position=UDim2.fromOffset(12,79), Size=UDim2.fromOffset(75,24),
-    Font=Enum.Font.GothamBold, Text="Color", TextColor3=C.text, TextSize=12,
-    TextXAlignment=Enum.TextXAlignment.Left})
-UIX.mouseColor = new("TextButton", {Parent=UIX.mouseWin, BackgroundColor3=C.panelHi,
-    Position=UDim2.fromOffset(182,78), Size=UDim2.fromOffset(106,27),
-    Font=Enum.Font.GothamBold, Text="GREEN", TextColor3=C.accent, TextSize=12}, {corner(7)})
-new("TextLabel", {Parent=UIX.mouseWin, BackgroundTransparency=1,
-    Position=UDim2.fromOffset(12,119), Size=UDim2.fromOffset(75,24),
-    Font=Enum.Font.GothamBold, Text="Size", TextColor3=C.text, TextSize=12,
-    TextXAlignment=Enum.TextXAlignment.Left})
-UIX.mouseSmaller = new("TextButton", {Parent=UIX.mouseWin, BackgroundColor3=C.panelHi,
-    Position=UDim2.fromOffset(164,117), Size=UDim2.fromOffset(34,28),
-    Font=Enum.Font.GothamBold, Text="-", TextColor3=C.text, TextSize=17}, {corner(7)})
-UIX.mouseSizeText = new("TextLabel", {Parent=UIX.mouseWin, BackgroundTransparency=1,
-    Position=UDim2.fromOffset(202,117), Size=UDim2.fromOffset(44,28),
-    Font=Enum.Font.GothamBold, Text="20", TextColor3=C.accent, TextSize=13})
-UIX.mouseBigger = new("TextButton", {Parent=UIX.mouseWin, BackgroundColor3=C.panelHi,
-    Position=UDim2.fromOffset(254,117), Size=UDim2.fromOffset(34,28),
-    Font=Enum.Font.GothamBold, Text="+", TextColor3=C.text, TextSize=17}, {corner(7)})
-new("TextLabel", {Parent=UIX.mouseWin, BackgroundTransparency=1,
-    Position=UDim2.fromOffset(12,153), Size=UDim2.new(1,-24,0,20),
-    Font=Enum.Font.Gotham, Text="Visual cursor - regular clicks are unchanged",
-    TextColor3=C.dim, TextSize=10, TextXAlignment=Enum.TextXAlignment.Center})
-
-local function refreshMouse()
-    UIX.mouseCursor.Size = UDim2.fromOffset(mouseSize, mouseSize)
-    local col = mouseColors[mouseColorIndex]
-    for _, part in ipairs(cursorParts) do part.BackgroundColor3 = col end
-    mouseDot.BackgroundColor3 = col
-    UIX.mouseSizeText.Text = tostring(mouseSize)
-    UIX.mouseColor.Text = mouseNames[mouseColorIndex]
-    UIX.mouseColor.TextColor3 = col
-    UIX.mouseToggle.Text = mouseEnabled and "ON" or "OFF"
-    UIX.mouseToggle.BackgroundColor3 = mouseEnabled and C.accent or C.panelHi
-    UIX.mouseToggle.TextColor3 = mouseEnabled and C.dark or C.dim
-    UIX.mouseCursor.Visible = mouseEnabled and UserInputService.MouseEnabled
-    UserInputService.MouseIconEnabled = mouseEnabled and false or oldMouseIconEnabled
-end
-UIX.mouseToggle.MouseButton1Click:Connect(function()
-    mouseEnabled = not mouseEnabled
-    refreshMouse()
-end)
-UIX.mouseColor.MouseButton1Click:Connect(function()
-    mouseColorIndex = mouseColorIndex % #mouseColors + 1
-    refreshMouse()
-end)
-UIX.mouseSmaller.MouseButton1Click:Connect(function()
-    mouseSize = math.max(12, mouseSize - 4)
-    refreshMouse()
-end)
-UIX.mouseBigger.MouseButton1Click:Connect(function()
-    mouseSize = math.min(48, mouseSize + 4)
-    refreshMouse()
-end)
-refreshMouse()
-
-table.insert(conns, RunService.RenderStepped:Connect(function()
-    if mouseEnabled and UserInputService.MouseEnabled then
-        -- Keep Roblox's default cursor hidden if CoreScripts restore it.
-        if UserInputService.MouseIconEnabled then
-            UserInputService.MouseIconEnabled = false
-        end
-        -- IgnoreGuiInset=true: GetMouseLocation uses the same screen coordinates.
-        local pos = UserInputService:GetMouseLocation()
-        UIX.mouseCursor.Position = UDim2.fromOffset(pos.X,pos.Y)
-    end
-end))
-local mouseDrag
-UIX.mouseTitle.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        mouseDrag = { start=Vector2.new(input.Position.X,input.Position.Y), pos=UIX.mouseWin.Position }
-    end
-end)
-table.insert(conns, UserInputService.InputChanged:Connect(function(input)
-    if not mouseDrag then return end
-    if input.UserInputType ~= Enum.UserInputType.MouseMovement and input.UserInputType ~= Enum.UserInputType.Touch then return end
-    local d = Vector2.new(input.Position.X,input.Position.Y)-mouseDrag.start
-    UIX.mouseWin.Position = UDim2.new(mouseDrag.pos.X.Scale,mouseDrag.pos.X.Offset+d.X,mouseDrag.pos.Y.Scale,mouseDrag.pos.Y.Offset+d.Y)
-end))
-table.insert(conns, UserInputService.InputEnded:Connect(function(input)
-    if mouseDrag and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then mouseDrag=nil end
-end))
-
 -- drag the speed window by its title bar
 local speedDrag
 UIX.speedTitle.InputBegan:Connect(function(input)
@@ -2911,9 +2766,6 @@ local function updateWalkStopBtn()
     UIX.speedGuiBtn.Text = UIX.speedWin.Visible and "CLOSE" or "OPEN"
     UIX.speedGuiBtn.TextColor3 = UIX.speedWin.Visible and C.dark or C.dim
     UIX.speedGuiBtn.BackgroundColor3 = UIX.speedWin.Visible and C.accent or C.panelHi
-    UIX.mouseGuiOpen.Text = UIX.mouseWin.Visible and "CLOSE" or "OPEN"
-    UIX.mouseGuiOpen.TextColor3 = UIX.mouseWin.Visible and C.dark or C.dim
-    UIX.mouseGuiOpen.BackgroundColor3 = UIX.mouseWin.Visible and C.accent or C.panelHi
     UIX.characterResetOpen.Text = UIX.resetWin.Visible and "CLOSE" or "OPEN"
     UIX.characterResetOpen.TextColor3 = UIX.resetWin.Visible and C.dark or C.dim
     UIX.characterResetOpen.BackgroundColor3 = UIX.resetWin.Visible and C.accent or C.panelHi
@@ -2987,15 +2839,6 @@ end)
 
 UIX.resetHide.MouseButton1Click:Connect(function()
     UIX.resetWin.Visible = false
-    updateWalkStopBtn()
-end)
-
-UIX.mouseGuiOpen.MouseButton1Click:Connect(function()
-    UIX.mouseWin.Visible = not UIX.mouseWin.Visible
-    updateWalkStopBtn()
-end)
-UIX.mouseHide.MouseButton1Click:Connect(function()
-    UIX.mouseWin.Visible = false
     updateWalkStopBtn()
 end)
 
@@ -3254,7 +3097,6 @@ local function unload()
     pcall(restoreCollisions)
     pcall(restoreOthers)
     state.cframeSpeedOn = false
-    pcall(function() UserInputService.MouseIconEnabled = oldMouseIconEnabled end)
     pcall(setHeadStill, false)
     -- unloading (re-execute): put the character's original animations back
     pcall(function()

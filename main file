@@ -983,6 +983,25 @@ end
 
 local function stopTrack()
     state.emoteToken = (state.emoteToken or 0) + 1 -- cancels an emote that is still loading
+    local myToken = state.emoteToken
+    local hadEmote = state.track ~= nil or state.activeEmote ~= nil
+    if hadEmote then
+        -- Emotes that went through Roblox's emote system (most UGC emotes) leave the
+        -- Animate script thinking an emote is still on, so after stopping it the
+        -- character froze in a stiff "stick figure" pose until you walked.
+        -- Restart Animate once the fade-out is done so the idle comes back.
+        task.delay(0.15, function()
+            if state.emoteToken ~= myToken or state.track ~= nil then return end -- a new emote started
+            local hum, char = getHumanoid()
+            local animate = char and char:FindFirstChild("Animate")
+            if hum and animate and hum.Health > 0 and hum.MoveDirection.Magnitude == 0 then
+                pcall(function()
+                    animate.Disabled = true
+                    animate.Disabled = false
+                end)
+            end
+        end)
+    end
     if state.track then
         pcall(function() state.track:Stop(0.1) end)
         state.track = nil
@@ -1006,6 +1025,35 @@ local function stopTrack()
     state.activeAnimId = nil
     state.activeEmote = nil
     updateHighlights()
+end
+
+-- Emotes play above everything else (some anim packs ship idles at Action
+-- priority, which used to blend into / take over the emote).
+function UIX.setTopPriority(track)
+    local ok = pcall(function() track.Priority = Enum.AnimationPriority.Action4 end)
+    if not ok then
+        pcall(function() track.Priority = Enum.AnimationPriority.Action end)
+    end
+end
+
+-- Fade out the previous emote (and any leftover copy of it), but never `keep`.
+function UIX.stopOldEmote(oldTrack, oldAnimId, keep)
+    if oldTrack and oldTrack ~= keep then
+        pcall(function() oldTrack:Stop(0.15) end)
+    end
+    if not oldAnimId then return end
+    local hum = getHumanoid()
+    if not hum then return end
+    pcall(function()
+        for _, tr in ipairs(hum:GetPlayingAnimationTracks()) do
+            if tr ~= keep then
+                local a = tr.Animation
+                if a and a.AnimationId:match("%d+") == oldAnimId then
+                    tr:Stop(0.15)
+                end
+            end
+        end
+    end)
 end
 
 function UIX.resolveEmoteAnimationId(emoteId)
@@ -1047,14 +1095,17 @@ local function playEmote(item)
         return
     end
 
-    stopTrack()
+    -- Switching emotes: the old emote keeps playing until the new one has loaded,
+    -- then they crossfade. (Stopping first left a gap where your idle showed.)
+    state.emoteToken = (state.emoteToken or 0) + 1 -- cancels an emote that is still loading
     local myToken = state.emoteToken
+    local oldTrack, oldAnimId = state.track, state.activeAnimId
     -- mark it green right away so a second click while it loads also cancels it
     state.activeEmote = item.id
     updateHighlights()
 
     -- Humanoid:PlayEmote tracks are cancelled by the engine as soon as you move.
-    -- With Walk stop OFF we play the animation ourselves (Action priority) so it
+    -- With Walk stop OFF we play the animation ourselves (top priority) so it
     -- keeps going while walking; with Walk stop ON we use the normal emote path.
     local function viaEmote()
         local ok, a, b = pcall(function()
@@ -1082,8 +1133,8 @@ local function playEmote(item)
             anim.AnimationId = "rbxassetid://" .. tostring(animId)
             local ok2, t = pcall(function() return animator:LoadAnimation(anim) end)
             if ok2 and t then
-                t.Priority = Enum.AnimationPriority.Action
-                pcall(function() t:Play() end)
+                UIX.setTopPriority(t)
+                pcall(function() t:Play(0.15) end)
                 return t
             end
         end
@@ -1104,18 +1155,39 @@ local function playEmote(item)
     end
 
     if not newTrack then
+        UIX.stopOldEmote(oldTrack, oldAnimId, nil)
+        if state.track == oldTrack then state.track = nil end
+        state.activeAnimId = nil
         state.activeEmote = nil
         updateHighlights()
         setStatus("Couldn't play that (R15 only)")
         return
     end
 
+    UIX.setTopPriority(newTrack)
     pcall(function() newTrack.Looped = true end)
     pcall(function() newTrack:AdjustSpeed(state.speed) end)
 
+    -- wait (briefly) for the new animation to actually load before letting go
+    -- of the old one, so there's no moment where the idle shows through
+    local waited = 0
+    while waited < 1.5 and myToken == state.emoteToken do
+        local okLen, len = pcall(function() return newTrack.Length end)
+        if not okLen or len > 0 then break end
+        waited = waited + task.wait()
+    end
+    if myToken ~= state.emoteToken then
+        pcall(function() newTrack:Stop(0) end)
+        return
+    end
+
+    local newAnimId
+    pcall(function() newAnimId = newTrack.Animation.AnimationId:match("%d+") end)
+
     state.track = newTrack
     state.activeEmote = item.id
-    pcall(function() state.activeAnimId = newTrack.Animation.AnimationId:match("%d+") end)
+    state.activeAnimId = newAnimId
+    UIX.stopOldEmote(oldTrack, oldAnimId, newTrack)
     updateHighlights()
     setStatus("Playing: " .. item.name)
 
@@ -1223,7 +1295,7 @@ end
 
 local function restartAnimate(hum, animate)
     for _, t in ipairs(hum:GetPlayingAnimationTracks()) do
-        t:Stop()
+        if t ~= state.track then t:Stop() end -- a playing emote keeps going
     end
     if hum.MoveDirection.Magnitude == 0 then
         animate.Disabled = true
@@ -1256,8 +1328,6 @@ local function applyPack(item, category)
                 state.activePack = nil
                 state.activeParts = {}
             end
-            state.track = nil
-            state.activeEmote = nil
             restartAnimate(hum, animate)
             updateHighlights()
             setStatus("Reset " .. (category or "all animations") .. " to default")
@@ -1324,10 +1394,8 @@ local function applyPack(item, category)
         UIX.ensureSnapshot(char2, animate2)
 
         for _, t in ipairs(hum2:GetPlayingAnimationTracks()) do
-            t:Stop()
+            if t ~= state.track then t:Stop() end -- a playing emote keeps going
         end
-        state.track = nil
-        state.activeEmote = nil
 
         local byCategory = {}
         for _, m in ipairs(wanted) do
@@ -2952,13 +3020,13 @@ function UIX.readSpeedBox(box, current)
     return n
 end
 
--- Reset: back to the default number and switched off
+-- Reset: back to the default number and switched on
 UIX.cfReset.MouseButton1Click:Connect(function()
     UIX.setCFrameSpeed(1)
-    state.cframeSpeedOn = false
+    state.cframeSpeedOn = true
     saveSettings()
     updateWalkStopBtn()
-    setStatus("CFrame speed reset to 1 and turned off")
+    setStatus("CFrame speed reset to 1 and turned on")
 end)
 
 UIX.cfBox.FocusLost:Connect(function()
@@ -3012,8 +3080,6 @@ UIX.resetBtn.MouseButton1Click:Connect(function()
     if restoreDefaults(animate, nil) then
         state.activePack = nil
         state.activeParts = {}
-        state.track = nil
-        state.activeEmote = nil
         restartAnimate(hum, animate)
         updateHighlights()
         setStatus("All animations reset to default")

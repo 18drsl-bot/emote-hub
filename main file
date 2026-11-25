@@ -35,7 +35,7 @@ local UIX = {} -- holds many helpers/widgets (Luau allows only 200 locals per ch
 
 local env = (typeof(getgenv) == "function" and getgenv()) or _G
 -- Re-executing unloads the previous copy first: it resets animations, walk speed,
--- noclip, antifling and head movement to normal, stops emotes, and removes the old GUI.
+-- noclip and antifling to normal, stops emotes, and removes the old GUI.
 if type(env.EmoteHubCleanup) == "function" then
     pcall(env.EmoteHubCleanup)
     env.EmoteHubCleanup = nil
@@ -45,7 +45,7 @@ if env.EmoteHubGui then
     env.EmoteHubGui = nil
 end
 -- sweep for any leftover window from an older copy that can't clean itself up
-pcall(function() RunService:UnbindFromRenderStep("EmoteHubStillHead") end)
+pcall(function() RunService:UnbindFromRenderStep("EmoteHubStillHead") end) -- head lock from older versions
 for _, getRoot in ipairs({
     function() return typeof(gethui) == "function" and gethui() or nil end,
     function() return game:GetService("CoreGui") end,
@@ -182,7 +182,6 @@ local state = {
     noclip = false, -- effects always start off, so every run is a clean slate
     noclipKey = (type(saved.noclipKey) == "string" and saved.noclipKey ~= "") and saved.noclipKey or nil,
     antifling = false,
-    noHead = false,
     cfValue = math.max(0, tonumber(saved.cfValue) or 6),
     cframeSpeedOn = saved.cframeSpeedOn == true,
     posX = tonumber(saved.posX),
@@ -304,7 +303,6 @@ local function saveSettings()
         noclip = state.noclip,
         noclipKey = state.noclipKey or "",
         antifling = state.antifling,
-        noHead = state.noHead,
         cfValue = state.cfValue,
         cframeSpeedOn = state.cframeSpeedOn,
         packCategory = state.packCategory,
@@ -828,12 +826,6 @@ UIX.antiflingBtn = UIX.makeToggleRow(
     3,
     "Antifling",
     "Other players can't push you, and sudden launches are cancelled and undone."
-)
-
-UIX.noHeadBtn = UIX.makeToggleRow(
-    4,
-    "No head movement",
-    "Your head stays still when you move the camera."
 )
 
 UIX.speedGuiBtn = UIX.makeToggleRow(
@@ -2429,52 +2421,6 @@ table.insert(conns, LocalPlayer.CharacterAdded:Connect(function()
 end))
 
 ------------------------------------------------------------------------
--- No head movement: keep the neck joint at its normal pose so the head doesn't
--- turn/tilt with the camera. Runs last in the render step so it wins over
--- any game script that moves the neck.
-------------------------------------------------------------------------
-UIX.R6_NECK_ROT = CFrame.new(0, 0, 0, -1, 0, 0, 0, 0, 1, 0, 1, 0)
-UIX.neckOriginal = setmetatable({}, { __mode = "k" })
-UIX.headBound = false
-UIX.HEAD_BIND = "EmoteHubStillHead"
-
-function UIX.keepHeadStill()
-    local char = LocalPlayer.Character
-    if not char then return end
-    local neck = char:FindFirstChild("Neck", true)
-    if not neck or not neck:IsA("Motor6D") then return end
-
-    local o = UIX.neckOriginal[neck]
-    if not o then
-        -- a neck's rotation is normally fixed, so keep only its position and
-        -- rebuild the standard rotation (works even if the head is already turned)
-        local c0p, c1p = neck.C0.Position, neck.C1.Position
-        if char:FindFirstChild("UpperTorso") then
-            o = { C0 = CFrame.new(c0p), C1 = CFrame.new(c1p) }
-        else
-            o = { C0 = CFrame.new(c0p) * UIX.R6_NECK_ROT, C1 = CFrame.new(c1p) * UIX.R6_NECK_ROT }
-        end
-        UIX.neckOriginal[neck] = o
-    end
-    if neck.C0 ~= o.C0 then neck.C0 = o.C0 end
-    if neck.C1 ~= o.C1 then neck.C1 = o.C1 end
-end
-
-local function setHeadStill(on)
-    if on and not UIX.headBound then
-        UIX.headBound = true
-        RunService:BindToRenderStep(UIX.HEAD_BIND, Enum.RenderPriority.Last.Value + 10, UIX.keepHeadStill)
-    elseif not on and UIX.headBound then
-        UIX.headBound = false
-        pcall(function() RunService:UnbindFromRenderStep(UIX.HEAD_BIND) end)
-    end
-end
-setHeadStill(state.noHead)
-table.insert(conns, LocalPlayer.CharacterAdded:Connect(function()
-    UIX.neckOriginal = setmetatable({}, { __mode = "k" })
-end))
-
-------------------------------------------------------------------------
 -- Speed window: matching Emote Hub theme, slider and title-only dragging
 ------------------------------------------------------------------------
 UIX.speedWin = new("Frame", {
@@ -2910,7 +2856,6 @@ local function updateWalkStopBtn()
     UIX.styleToggle(UIX.walkStopBtn, state.walkStop)
     UIX.styleToggle(UIX.noclipBtn, state.noclip)
     UIX.styleToggle(UIX.antiflingBtn, state.antifling)
-    UIX.styleToggle(UIX.noHeadBtn, state.noHead)
     UIX.styleToggle(UIX.cfToggle, state.cframeSpeedOn)
     UIX.speedGuiBtn.Text = UIX.speedWin.Visible and "CLOSE" or "OPEN"
     UIX.speedGuiBtn.TextColor3 = UIX.speedWin.Visible and C.dark or C.dim
@@ -3031,14 +2976,6 @@ end)
 
 UIX.cfBox.FocusLost:Connect(function()
     UIX.setCFrameSpeed(UIX.readSpeedBox(UIX.cfBox, state.cfValue))
-end)
-
-UIX.noHeadBtn.MouseButton1Click:Connect(function()
-    state.noHead = not state.noHead
-    setHeadStill(state.noHead)
-    updateWalkStopBtn()
-    saveSettings()
-    setStatus(state.noHead and "Head movement off" or "Head movement back on")
 end)
 
 UIX.antiflingBtn.MouseButton1Click:Connect(function()
@@ -3242,7 +3179,6 @@ local function unload()
     pcall(restoreCollisions)
     pcall(restoreOthers)
     state.cframeSpeedOn = false
-    pcall(setHeadStill, false)
     -- unloading (re-execute): put the character's original animations back
     pcall(function()
         local hum, char = getHumanoid()
